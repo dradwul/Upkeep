@@ -7,7 +7,14 @@
 
 <div class="dashboard">
     <header class="dashboard-header">
-        <a class="brand" href="">Upkeep</a>
+        <a class="brand" href="" aria-label="Upkeep startsida">
+            <span class="brand-up" aria-hidden="true">
+                <span class="brand-up-word">Up</span>
+                <svg class="brand-up-arrow" viewBox="0 0 24 24" fill="none">
+                    <path d="M12 19V5m-7 7 7-7 7 7" />
+                </svg>
+            </span><span class="brand-keep">keep</span>
+        </a>
         <button class="theme-toggle" type="button" @onclick="ToggleTheme" aria-label="Växla färgtema">
             <i data-lucide="@(isDarkMode ? "sun" : "moon")"></i>
         </button>
