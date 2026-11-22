@@ -6,37 +6,24 @@
 
 <div class="dashboard">
     <header class="dashboard-header">
-        <a class="brand" href="" aria-label="Upkeep startsida">
-            <span class="brand-mark" aria-hidden="true"><i data-lucide="layers"></i></span>
-            <span>upkeep<span class="brand-period">.</span></span>
-        </a>
-        <div class="header-actions">
-            <span class="header-caption">Ditt hem, i gott skick</span>
-            <button class="theme-toggle" type="button" @onclick="ToggleTheme" aria-label="Växla färgtema">
-                <i data-lucide="@(isDarkMode ? "sun" : "moon")"></i>
-            </button>
-        </div>
+        <a class="brand" href="">Upkeep</a>
+        <button class="theme-toggle" type="button" @onclick="ToggleTheme" aria-label="Växla färgtema">
+            <i data-lucide="@(isDarkMode ? "sun" : "moon")"></i>
+        </button>
     </header>
 
     <main class="dashboard-main">
         <section class="welcome-section">
-            <div class="welcome-copy">
-                <p class="eyebrow">DIN PERSONLIGA UNDERHÅLLSBOK</p>
-                <h1>Ta hand om det<br />du <span>äger.</span></h1>
-                <p class="welcome-description">Samla underhåll, detaljer och minnen på ett och samma ställe.</p>
-            </div>
+            <h1>Översikt</h1>
             <button class="primary-button add-category-button" type="button" @onclick="OpenAddCategory">
                 <i data-lucide="plus" aria-hidden="true"></i>
-                <span>Lägg till kategori</span>
+                <span>Ny kategori</span>
             </button>
         </section>
 
         <section class="category-section" aria-labelledby="category-heading">
             <div class="section-heading">
-                <div>
-                    <p class="eyebrow">DIN ÖVERSIKT</p>
-                    <h2 id="category-heading">Dina saker <span class="count-badge">@categories.Count</span></h2>
-                </div>
+                <h2 id="category-heading">Kategorier</h2>
                 @if (categories.Any(category => category.IsSampleData))
                 {
                     <button class="text-button" type="button" @onclick="ClearSampleData">Rensa exempeldata</button>
@@ -53,12 +40,7 @@
             else if (categories.Count == 0)
             {
                 <div class="empty-state">
-                    <div class="empty-icon"><i data-lucide="archive"></i></div>
-                    <h3>Här börjar din översikt</h3>
-                    <p>Lägg till en kategori för något du vill hålla koll på.</p>
-                    <button class="secondary-button" type="button" @onclick="OpenAddCategory">
-                        <i data-lucide="plus" aria-hidden="true"></i> Skapa första kategorin
-                    </button>
+                    <p>Inga kategorier ännu.</p>
                 </div>
             }
             else
@@ -75,7 +57,6 @@
                                 <span class="category-name">@category.Name</span>
                                 <span class="category-meta">@GetCategorySummary(category)</span>
                             </span>
-                            <i class="category-arrow" data-lucide="arrow-up-right" aria-hidden="true"></i>
                         </button>
                     }
                 </div>
@@ -86,17 +67,13 @@
         {
             <section class="details-section" aria-labelledby="details-heading">
                 <div class="section-heading details-heading">
-                    <div>
-                        <p class="eyebrow">KATEGORI</p>
-                        <h2 id="details-heading">@selectedCategory.Name</h2>
-                    </div>
+                    <h2 id="details-heading">@selectedCategory.Name</h2>
                     <button class="text-button" type="button" @onclick="() => selectedCategory = null">Stäng</button>
                 </div>
                 @if (selectedCategory.SubCategories.Count == 0)
                 {
                     <div class="detail-empty">
                         <p>Inga underkategorier ännu.</p>
-                        <span>Lägg till en plats eller typ för att hålla ordning på dina loggar.</span>
                     </div>
                 }
                 else
@@ -127,11 +104,6 @@
                 }
             </section>
         }
-
-        <footer class="dashboard-footer">
-            <span>Gjort för att hålla.</span>
-            <span>Din data stannar på den här enheten.</span>
-        </footer>
     </main>
 </div>
 
@@ -140,10 +112,7 @@
     <div class="modal-backdrop" @onclick="CloseAddCategory" @onkeydown="HandleModalKeyDown">
         <section class="category-modal" role="dialog" aria-modal="true" aria-labelledby="modal-heading" @onclick:stopPropagation="true">
             <div class="modal-heading">
-                <div>
-                    <p class="eyebrow">KOM IGÅNG</p>
-                    <h2 id="modal-heading">Ny kategori</h2>
-                </div>
+                <h2 id="modal-heading">Ny kategori</h2>
                 <button class="icon-button" type="button" aria-label="Stäng" @onclick="CloseAddCategory">
                     <i data-lucide="x"></i>
                 </button>
@@ -184,7 +153,7 @@
     protected override async Task OnInitializedAsync()
     {
         categories = (await LogService.GetCategoriesAsync()).ToList();
-        selectedCategory = categories.FirstOrDefault();
+        selectedCategory = null;
         isLoading = false;
         var storedTheme = await JS.InvokeAsync<string?>("localStorage.getItem", ThemeStorageKey);
         isDarkMode = storedTheme == "dark";
