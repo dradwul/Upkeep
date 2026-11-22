@@ -1,11 +1,11 @@
 {
-  "name": "Upkeep",
+  "name": "Upkeep – underhåll och ägandelogg",
   "short_name": "Upkeep",
   "id": "./",
   "start_url": "./",
   "display": "standalone",
-  "background_color": "#ffffff",
-  "theme_color": "#03173d",
+  "background_color": "#F4F3EF",
+  "theme_color": "#D95D39",
   "prefer_related_applications": false,
   "icons": [
     {

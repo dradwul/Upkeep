@@ -1,7 +1,269 @@
-﻿@page "/"
+@page "/"
+@inject ILogService LogService
+@inject IJSRuntime JS
 
-<PageTitle>Home</PageTitle>
+<PageTitle>Översikt · Upkeep</PageTitle>
 
-<h1>Hello, world!</h1>
+<div class="dashboard">
+    <header class="dashboard-header">
+        <a class="brand" href="" aria-label="Upkeep startsida">
+            <span class="brand-mark" aria-hidden="true"><i data-lucide="layers"></i></span>
+            <span>upkeep<span class="brand-period">.</span></span>
+        </a>
+        <div class="header-actions">
+            <span class="header-caption">Ditt hem, i gott skick</span>
+            <button class="theme-toggle" type="button" @onclick="ToggleTheme" aria-label="Växla färgtema">
+                <i data-lucide="@(isDarkMode ? "sun" : "moon")"></i>
+            </button>
+        </div>
+    </header>
 
-Welcome to your new app.
+    <main class="dashboard-main">
+        <section class="welcome-section">
+            <div class="welcome-copy">
+                <p class="eyebrow">DIN PERSONLIGA UNDERHÅLLSBOK</p>
+                <h1>Ta hand om det<br />du <span>äger.</span></h1>
+                <p class="welcome-description">Samla underhåll, detaljer och minnen på ett och samma ställe.</p>
+            </div>
+            <button class="primary-button add-category-button" type="button" @onclick="OpenAddCategory">
+                <i data-lucide="plus" aria-hidden="true"></i>
+                <span>Lägg till kategori</span>
+            </button>
+        </section>
+
+        <section class="category-section" aria-labelledby="category-heading">
+            <div class="section-heading">
+                <div>
+                    <p class="eyebrow">DIN ÖVERSIKT</p>
+                    <h2 id="category-heading">Dina saker <span class="count-badge">@categories.Count</span></h2>
+                </div>
+                @if (categories.Any(category => category.IsSampleData))
+                {
+                    <button class="text-button" type="button" @onclick="ClearSampleData">Rensa exempeldata</button>
+                }
+            </div>
+
+            @if (isLoading)
+            {
+                <div class="empty-state" aria-live="polite">
+                    <span class="loading-indicator"></span>
+                    <p>Hämtar dina kategorier…</p>
+                </div>
+            }
+            else if (categories.Count == 0)
+            {
+                <div class="empty-state">
+                    <div class="empty-icon"><i data-lucide="archive"></i></div>
+                    <h3>Här börjar din översikt</h3>
+                    <p>Lägg till en kategori för något du vill hålla koll på.</p>
+                    <button class="secondary-button" type="button" @onclick="OpenAddCategory">
+                        <i data-lucide="plus" aria-hidden="true"></i> Skapa första kategorin
+                    </button>
+                </div>
+            }
+            else
+            {
+                <div class="category-grid">
+                    @foreach (var category in categories)
+                    {
+                        <button class="category-card @(selectedCategory?.Id == category.Id ? "is-selected" : "")"
+                                type="button"
+                                @onclick="() => SelectCategory(category)"
+                                aria-pressed="@(selectedCategory?.Id == category.Id)">
+                            <span class="category-icon"><i data-lucide="@category.Icon" aria-hidden="true"></i></span>
+                            <span class="category-card-copy">
+                                <span class="category-name">@category.Name</span>
+                                <span class="category-meta">@GetCategorySummary(category)</span>
+                            </span>
+                            <i class="category-arrow" data-lucide="arrow-up-right" aria-hidden="true"></i>
+                        </button>
+                    }
+                </div>
+            }
+        </section>
+
+        @if (selectedCategory is not null)
+        {
+            <section class="details-section" aria-labelledby="details-heading">
+                <div class="section-heading details-heading">
+                    <div>
+                        <p class="eyebrow">KATEGORI</p>
+                        <h2 id="details-heading">@selectedCategory.Name</h2>
+                    </div>
+                    <button class="text-button" type="button" @onclick="() => selectedCategory = null">Stäng</button>
+                </div>
+                @if (selectedCategory.SubCategories.Count == 0)
+                {
+                    <div class="detail-empty">
+                        <p>Inga underkategorier ännu.</p>
+                        <span>Lägg till en plats eller typ för att hålla ordning på dina loggar.</span>
+                    </div>
+                }
+                else
+                {
+                    <div class="subcategory-list">
+                        @foreach (var subCategory in selectedCategory.SubCategories)
+                        {
+                            <article class="subcategory-row">
+                                <span class="subcategory-icon"><i data-lucide="folder" aria-hidden="true"></i></span>
+                                <div class="subcategory-copy">
+                                    <h3>@subCategory.Name</h3>
+                                    @if (subCategory.LogEntries.Count == 0)
+                                    {
+                                        <p>Inga anteckningar ännu</p>
+                                    }
+                                    else
+                                    {
+                                        <p>@subCategory.LogEntries.Count @(subCategory.LogEntries.Count == 1 ? "anteckning" : "anteckningar")</p>
+                                    }
+                                </div>
+                                @if (subCategory.LogEntries.Count > 0)
+                                {
+                                    <span class="latest-entry">@subCategory.LogEntries.OrderByDescending(entry => entry.Date).First().Title</span>
+                                }
+                            </article>
+                        }
+                    </div>
+                }
+            </section>
+        }
+
+        <footer class="dashboard-footer">
+            <span>Gjort för att hålla.</span>
+            <span>Din data stannar på den här enheten.</span>
+        </footer>
+    </main>
+</div>
+
+@if (isAddCategoryOpen)
+{
+    <div class="modal-backdrop" @onclick="CloseAddCategory" @onkeydown="HandleModalKeyDown">
+        <section class="category-modal" role="dialog" aria-modal="true" aria-labelledby="modal-heading" @onclick:stopPropagation="true">
+            <div class="modal-heading">
+                <div>
+                    <p class="eyebrow">KOM IGÅNG</p>
+                    <h2 id="modal-heading">Ny kategori</h2>
+                </div>
+                <button class="icon-button" type="button" aria-label="Stäng" @onclick="CloseAddCategory">
+                    <i data-lucide="x"></i>
+                </button>
+            </div>
+            <EditForm Model="newCategory" OnValidSubmit="CreateCategory">
+                <DataAnnotationsValidator />
+                <label for="category-name">Namn</label>
+                <InputText id="category-name" @bind-Value="newCategory.Name" placeholder="Till exempel Sommarhuset" maxlength="60" />
+                <ValidationMessage For="@(() => newCategory.Name)" />
+
+                <label for="category-icon">Välj en ikon</label>
+                <select id="category-icon" @bind="newCategory.Icon">
+                    <option value="car-front">Bil</option>
+                    <option value="house">Hus</option>
+                    <option value="bike">Cykel</option>
+                    <option value="trees">Trädgård</option>
+                    <option value="box">Övrigt</option>
+                </select>
+
+                <div class="modal-actions">
+                    <button class="secondary-button" type="button" @onclick="CloseAddCategory">Avbryt</button>
+                    <button class="primary-button" type="submit">Skapa kategori</button>
+                </div>
+            </EditForm>
+        </section>
+    </div>
+}
+
+@code {
+    private const string ThemeStorageKey = "upkeep-theme";
+    private List<Category> categories = [];
+    private Category? selectedCategory;
+    private NewCategoryInput newCategory = new();
+    private bool isLoading = true;
+    private bool isDarkMode;
+    private bool isAddCategoryOpen;
+
+    protected override async Task OnInitializedAsync()
+    {
+        categories = (await LogService.GetCategoriesAsync()).ToList();
+        selectedCategory = categories.FirstOrDefault();
+        isLoading = false;
+        var storedTheme = await JS.InvokeAsync<string?>("localStorage.getItem", ThemeStorageKey);
+        isDarkMode = storedTheme == "dark";
+        await ApplyTheme();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        await JS.InvokeVoidAsync("lucide.createIcons");
+    }
+
+    private async Task ToggleTheme()
+    {
+        isDarkMode = !isDarkMode;
+        await JS.InvokeVoidAsync("localStorage.setItem", ThemeStorageKey, isDarkMode ? "dark" : "light");
+        await ApplyTheme();
+    }
+
+    private async Task ApplyTheme()
+    {
+        await JS.InvokeVoidAsync("document.documentElement.setAttribute", "data-theme", isDarkMode ? "dark" : "light");
+    }
+
+    private void SelectCategory(Category category) => selectedCategory = category;
+
+    private string GetCategorySummary(Category category)
+    {
+        var subCategoryCount = category.SubCategories.Count;
+        var entryCount = category.SubCategories.Sum(subCategory => subCategory.LogEntries.Count);
+        var subCategoryLabel = subCategoryCount == 1 ? "underkategori" : "underkategorier";
+        var entryLabel = entryCount == 1 ? "anteckning" : "anteckningar";
+        return $"{subCategoryCount} {subCategoryLabel} · {entryCount} {entryLabel}";
+    }
+
+    private void OpenAddCategory()
+    {
+        newCategory = new NewCategoryInput();
+        isAddCategoryOpen = true;
+    }
+
+    private void CloseAddCategory() => isAddCategoryOpen = false;
+
+    private async Task CreateCategory()
+    {
+        var category = new Category
+        {
+            Name = newCategory.Name.Trim(),
+            Icon = newCategory.Icon
+        };
+        categories.Add(category);
+        await LogService.SaveCategoriesAsync(categories);
+        selectedCategory = category;
+        isAddCategoryOpen = false;
+    }
+
+    private async Task ClearSampleData()
+    {
+        categories.RemoveAll(category => category.IsSampleData);
+        await LogService.SaveCategoriesAsync(categories);
+        if (selectedCategory?.IsSampleData == true)
+        {
+            selectedCategory = categories.FirstOrDefault();
+        }
+    }
+
+    private void HandleModalKeyDown(KeyboardEventArgs args)
+    {
+        if (args.Key == "Escape")
+        {
+            CloseAddCategory();
+        }
+    }
+
+    private sealed class NewCategoryInput
+    {
+        [System.ComponentModel.DataAnnotations.Required(ErrorMessage = "Skriv ett namn på kategorin.")]
+        [System.ComponentModel.DataAnnotations.StringLength(60, ErrorMessage = "Namnet får vara högst 60 tecken.")]
+        public string Name { get; set; } = string.Empty;
+
+        public string Icon { get; set; } = "box";
+    }
+}
