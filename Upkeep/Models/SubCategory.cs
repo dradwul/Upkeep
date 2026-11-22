@@ -6,5 +6,9 @@ public sealed class SubCategory
 
     public string Name { get; set; } = string.Empty;
 
+    public string? GroupName { get; set; }
+
+    public bool? IsSampleData { get; set; }
+
     public List<LogEntry> LogEntries { get; set; } = [];
 }

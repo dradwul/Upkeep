@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" fill="#F4F3EF"/>
+  <path d="M105 348V164m-63 63 63-63 63 63" fill="none" stroke="#D95D39" stroke-linecap="round" stroke-linejoin="round" stroke-width="24"/>
+  <text x="177" y="306" fill="#181A1B" font-family="Cabinet Grotesk, Arial, sans-serif" font-size="118" font-weight="700" letter-spacing="-8">keep</text>
+</svg>

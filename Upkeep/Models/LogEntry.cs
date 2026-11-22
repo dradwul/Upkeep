@@ -8,6 +8,8 @@ public sealed class LogEntry
 
     public string Title { get; set; } = string.Empty;
 
+    public bool? IsSampleData { get; set; }
+
     public string Notes { get; set; } = string.Empty;
 
     public string? Brand { get; set; }

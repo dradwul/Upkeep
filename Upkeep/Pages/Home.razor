@@ -1,4 +1,5 @@
 @page "/"
+@using System.Globalization
 @inject ILogService LogService
 @inject IJSRuntime JS
 
@@ -24,7 +25,7 @@
         <section class="category-section" aria-labelledby="category-heading">
             <div class="section-heading">
                 <h2 id="category-heading">Kategorier</h2>
-                @if (categories.Any(category => category.IsSampleData))
+                @if (HasSampleData)
                 {
                     <button class="text-button" type="button" @onclick="ClearSampleData">Rensa exempeldata</button>
                 }
@@ -68,7 +69,10 @@
             <section class="details-section" aria-labelledby="details-heading">
                 <div class="section-heading details-heading">
                     <h2 id="details-heading">@selectedCategory.Name</h2>
-                    <button class="text-button" type="button" @onclick="() => selectedCategory = null">Stäng</button>
+                    <div class="details-actions">
+                        <button class="secondary-button" type="button" @onclick="OpenAddSubCategory">Ny underkategori</button>
+                        <button class="text-button" type="button" @onclick="() => selectedCategory = null">Stäng</button>
+                    </div>
                 </div>
                 @if (selectedCategory.SubCategories.Count == 0)
                 {
@@ -78,29 +82,57 @@
                 }
                 else
                 {
-                    <div class="subcategory-list">
-                        @foreach (var subCategory in selectedCategory.SubCategories)
+                    @foreach (var group in selectedCategory.SubCategories
+                        .GroupBy(subCategory => subCategory.GroupName?.Trim() ?? string.Empty)
+                        .OrderBy(group => group.Key.Equals("Ytskikt", StringComparison.CurrentCultureIgnoreCase) ? 0 : 1)
+                        .ThenBy(group => group.Key, StringComparer.CurrentCultureIgnoreCase))
+                    {
+                        @if (!string.IsNullOrWhiteSpace(group.Key))
                         {
-                            <article class="subcategory-row">
-                                <span class="subcategory-icon"><i data-lucide="folder" aria-hidden="true"></i></span>
-                                <div class="subcategory-copy">
-                                    <h3>@subCategory.Name</h3>
-                                    @if (subCategory.LogEntries.Count == 0)
-                                    {
-                                        <p>Inga anteckningar ännu</p>
-                                    }
-                                    else
-                                    {
-                                        <p>@subCategory.LogEntries.Count @(subCategory.LogEntries.Count == 1 ? "anteckning" : "anteckningar")</p>
-                                    }
-                                </div>
-                                @if (subCategory.LogEntries.Count > 0)
-                                {
-                                    <span class="latest-entry">@subCategory.LogEntries.OrderByDescending(entry => entry.Date).First().Title</span>
-                                }
-                            </article>
+                            <h3 class="subcategory-group-heading">@group.Key</h3>
                         }
-                    </div>
+                        <div class="subcategory-list">
+                            @foreach (var subCategory in group.OrderBy(subCategory => subCategory.Name, StringComparer.CurrentCultureIgnoreCase))
+                            {
+                                <article class="subcategory-card">
+                                    <div class="subcategory-row">
+                                        <span class="subcategory-icon"><i data-lucide="folder" aria-hidden="true"></i></span>
+                                        <div class="subcategory-copy">
+                                            <h3>@subCategory.Name</h3>
+                                            <p>@(subCategory.LogEntries.Count == 0
+                                                ? "Inga händelser"
+                                                : $"{subCategory.LogEntries.Count} {(subCategory.LogEntries.Count == 1 ? "händelse" : "händelser")}")</p>
+                                        </div>
+                                        <button class="text-button add-log-button" type="button" @onclick="() => OpenAddLogEntry(subCategory)">Ny händelse</button>
+                                    </div>
+                                    @if (subCategory.LogEntries.Count > 0)
+                                    {
+                                        <div class="log-entries">
+                                            @foreach (var entry in subCategory.LogEntries.OrderByDescending(entry => entry.Date))
+                                            {
+                                                <article class="log-entry">
+                                                    <time class="log-date" datetime="@entry.Date.ToString("yyyy-MM-dd")">
+                                                        @entry.Date.ToString("yyyy-MM-dd", SwedishCulture)
+                                                    </time>
+                                                    <div class="log-entry-copy">
+                                                        <h4>@entry.Title</h4>
+                                                        @if (!string.IsNullOrWhiteSpace(entry.Notes))
+                                                        {
+                                                            <p>@entry.Notes</p>
+                                                        }
+                                                        @if (GetEntryDetails(entry) is { Length: > 0 } details)
+                                                        {
+                                                            <p class="log-entry-meta">@details</p>
+                                                        }
+                                                    </div>
+                                                </article>
+                                            }
+                                        </div>
+                                    }
+                                </article>
+                            }
+                        </div>
+                    }
                 }
             </section>
         }
@@ -119,8 +151,15 @@
             </div>
             <EditForm Model="newCategory" OnValidSubmit="CreateCategory">
                 <DataAnnotationsValidator />
+                <label for="category-template">Förslag</label>
+                <select id="category-template" @bind="newCategory.Template" @bind:after="ApplyCategoryTemplate">
+                    <option value="">Egen kategori</option>
+                    <option value="car">Bil (olja, service, däck, bromsar)</option>
+                    <option value="home">Hem (ytskikt, rum, installationer)</option>
+                </select>
+
                 <label for="category-name">Namn</label>
-                <InputText id="category-name" @bind-Value="newCategory.Name" placeholder="Till exempel Sommarhuset" maxlength="60" />
+                <InputText id="category-name" @bind-Value="newCategory.Name" placeholder="@GetCategoryPlaceholder()" maxlength="60" />
                 <ValidationMessage For="@(() => newCategory.Name)" />
 
                 <label for="category-icon">Välj en ikon</label>
@@ -141,14 +180,99 @@
     </div>
 }
 
+@if (isAddSubCategoryOpen && selectedCategory is not null)
+{
+    <div class="modal-backdrop" @onclick="CloseAddSubCategory" @onkeydown="HandleModalKeyDown">
+        <section class="category-modal" role="dialog" aria-modal="true" aria-labelledby="subcategory-modal-heading" @onclick:stopPropagation="true">
+            <div class="modal-heading">
+                <h2 id="subcategory-modal-heading">Ny underkategori</h2>
+                <button class="icon-button" type="button" aria-label="Stäng" @onclick="CloseAddSubCategory">
+                    <i data-lucide="x"></i>
+                </button>
+            </div>
+            <EditForm Model="newSubCategory" OnValidSubmit="CreateSubCategory">
+                <DataAnnotationsValidator />
+                <label for="subcategory-group">Grupp (valfritt)</label>
+                <InputText id="subcategory-group" @bind-Value="newSubCategory.GroupName" placeholder="Till exempel Ytskikt" maxlength="60" />
+
+                <label for="subcategory-name">Namn</label>
+                <InputText id="subcategory-name" @bind-Value="newSubCategory.Name" placeholder="Till exempel Tak" maxlength="60" />
+                <ValidationMessage For="@(() => newSubCategory.Name)" />
+
+                <div class="modal-actions">
+                    <button class="secondary-button" type="button" @onclick="CloseAddSubCategory">Avbryt</button>
+                    <button class="primary-button" type="submit">Spara</button>
+                </div>
+            </EditForm>
+        </section>
+    </div>
+}
+
+@if (isAddLogEntryOpen && selectedCategory is not null && targetSubCategory is not null)
+{
+    <div class="modal-backdrop" @onclick="CloseAddLogEntry" @onkeydown="HandleModalKeyDown">
+        <section class="category-modal" role="dialog" aria-modal="true" aria-labelledby="log-modal-heading" @onclick:stopPropagation="true">
+            <div class="modal-heading">
+                <h2 id="log-modal-heading">Ny händelse · @targetSubCategory.Name</h2>
+                <button class="icon-button" type="button" aria-label="Stäng" @onclick="CloseAddLogEntry">
+                    <i data-lucide="x"></i>
+                </button>
+            </div>
+            <EditForm Model="newLogEntry" OnValidSubmit="CreateLogEntry">
+                <DataAnnotationsValidator />
+                <label for="entry-date">Datum</label>
+                <InputDate id="entry-date" @bind-Value="newLogEntry.Date" />
+
+                <label for="entry-title">Händelse</label>
+                <InputText id="entry-title" @bind-Value="newLogEntry.Title" placeholder="Till exempel Taket omlagt" maxlength="100" />
+                <ValidationMessage For="@(() => newLogEntry.Title)" />
+
+                <label for="entry-notes">Anteckningar</label>
+                <InputTextArea id="entry-notes" @bind-Value="newLogEntry.Notes" rows="3" />
+
+                <label for="entry-brand">Märke</label>
+                <InputText id="entry-brand" @bind-Value="newLogEntry.Brand" maxlength="80" />
+
+                <label for="entry-model">Modell</label>
+                <InputText id="entry-model" @bind-Value="newLogEntry.Model" maxlength="80" />
+
+                <label for="entry-specifications">Specifikationer</label>
+                <InputText id="entry-specifications" @bind-Value="newLogEntry.Specifications" maxlength="300" />
+
+                <div class="entry-extra-fields">
+                    <div>
+                        <label for="entry-cost">Kostnad (kr)</label>
+                        <InputNumber id="entry-cost" @bind-Value="newLogEntry.Cost" />
+                    </div>
+                    <div>
+                        <label for="entry-mileage">Miltal (km)</label>
+                        <InputNumber id="entry-mileage" @bind-Value="newLogEntry.Mileage" />
+                    </div>
+                </div>
+
+                <div class="modal-actions">
+                    <button class="secondary-button" type="button" @onclick="CloseAddLogEntry">Avbryt</button>
+                    <button class="primary-button" type="submit">Spara händelse</button>
+                </div>
+            </EditForm>
+        </section>
+    </div>
+}
+
 @code {
     private const string ThemeStorageKey = "upkeep-theme";
+    private static readonly CultureInfo SwedishCulture = CultureInfo.GetCultureInfo("sv-SE");
     private List<Category> categories = [];
     private Category? selectedCategory;
     private NewCategoryInput newCategory = new();
+    private NewSubCategoryInput newSubCategory = new();
+    private NewLogEntryInput newLogEntry = new();
+    private SubCategory? targetSubCategory;
     private bool isLoading = true;
     private bool isDarkMode;
     private bool isAddCategoryOpen;
+    private bool isAddSubCategoryOpen;
+    private bool isAddLogEntryOpen;
 
     protected override async Task OnInitializedAsync()
     {
@@ -179,13 +303,45 @@
 
     private void SelectCategory(Category category) => selectedCategory = category;
 
+    private bool HasSampleData => categories.Any(category =>
+        category.IsSampleData ||
+        category.SubCategories.Any(subCategory =>
+            subCategory.IsSampleData == true ||
+            subCategory.LogEntries.Any(entry => entry.IsSampleData == true)));
+
     private string GetCategorySummary(Category category)
     {
         var subCategoryCount = category.SubCategories.Count;
         var entryCount = category.SubCategories.Sum(subCategory => subCategory.LogEntries.Count);
         var subCategoryLabel = subCategoryCount == 1 ? "underkategori" : "underkategorier";
-        var entryLabel = entryCount == 1 ? "anteckning" : "anteckningar";
+        var entryLabel = entryCount == 1 ? "händelse" : "händelser";
         return $"{subCategoryCount} {subCategoryLabel} · {entryCount} {entryLabel}";
+    }
+
+    private string GetEntryDetails(LogEntry entry)
+    {
+        var details = new List<string>();
+        if (!string.IsNullOrWhiteSpace(entry.Brand))
+        {
+            details.Add(entry.Brand);
+        }
+        if (!string.IsNullOrWhiteSpace(entry.Model))
+        {
+            details.Add(entry.Model);
+        }
+        if (!string.IsNullOrWhiteSpace(entry.Specifications))
+        {
+            details.Add(entry.Specifications);
+        }
+        if (entry.Cost.HasValue)
+        {
+            details.Add($"{entry.Cost.Value.ToString("N0", SwedishCulture)} kr");
+        }
+        if (entry.Mileage.HasValue)
+        {
+            details.Add($"{entry.Mileage.Value.ToString("N0", SwedishCulture)} km");
+        }
+        return string.Join(" · ", details);
     }
 
     private void OpenAddCategory()
@@ -194,6 +350,34 @@
         isAddCategoryOpen = true;
     }
 
+    private void ApplyCategoryTemplate()
+    {
+        var suggestedName = newCategory.Template switch
+        {
+            "car" => "Bilen",
+            "home" => "Hemmet",
+            _ => string.Empty
+        };
+        if (string.IsNullOrWhiteSpace(newCategory.Name) || newCategory.Name == newCategory.SuggestedName)
+        {
+            newCategory.Name = suggestedName;
+        }
+        newCategory.SuggestedName = suggestedName;
+        newCategory.Icon = newCategory.Template switch
+        {
+            "car" => "car-front",
+            "home" => "house",
+            _ => "box"
+        };
+    }
+
+    private string GetCategoryPlaceholder() => newCategory.Template switch
+    {
+        "car" => "Bilen",
+        "home" => "Hemmet",
+        _ => "Till exempel Sommarhuset"
+    };
+
     private void CloseAddCategory() => isAddCategoryOpen = false;
 
     private async Task CreateCategory()
@@ -201,7 +385,8 @@
         var category = new Category
         {
             Name = newCategory.Name.Trim(),
-            Icon = newCategory.Icon
+            Icon = newCategory.Icon,
+            SubCategories = CreateTemplateSubCategories(newCategory.Template)
         };
         categories.Add(category);
         await LogService.SaveCategoriesAsync(categories);
@@ -209,13 +394,113 @@
         isAddCategoryOpen = false;
     }
 
+    private static List<SubCategory> CreateTemplateSubCategories(string template) => template switch
+    {
+        "car" =>
+        [
+            new SubCategory { Name = "Oljebyte", IsSampleData = false },
+            new SubCategory { Name = "Service", IsSampleData = false },
+            new SubCategory { Name = "Däck", IsSampleData = false },
+            new SubCategory { Name = "Bromsar", IsSampleData = false }
+        ],
+        "home" =>
+        [
+            new SubCategory { Name = "Tak", GroupName = "Ytskikt", IsSampleData = false },
+            new SubCategory { Name = "Panel", GroupName = "Ytskikt", IsSampleData = false },
+            new SubCategory { Name = "Fönster", GroupName = "Ytskikt", IsSampleData = false },
+            new SubCategory { Name = "Dörrar", GroupName = "Ytskikt", IsSampleData = false },
+            new SubCategory { Name = "Kök", GroupName = "Rum", IsSampleData = false },
+            new SubCategory { Name = "Badrum", GroupName = "Rum", IsSampleData = false },
+            new SubCategory { Name = "Källare", GroupName = "Rum", IsSampleData = false },
+            new SubCategory { Name = "Värme", GroupName = "Installationer", IsSampleData = false },
+            new SubCategory { Name = "VVS", GroupName = "Installationer", IsSampleData = false },
+            new SubCategory { Name = "Ventilation", GroupName = "Installationer", IsSampleData = false }
+        ],
+        _ => []
+    };
+
+    private void OpenAddSubCategory()
+    {
+        newSubCategory = new NewSubCategoryInput();
+        isAddSubCategoryOpen = true;
+    }
+
+    private void CloseAddSubCategory() => isAddSubCategoryOpen = false;
+
+    private async Task CreateSubCategory()
+    {
+        if (selectedCategory is null)
+        {
+            return;
+        }
+
+        selectedCategory.SubCategories.Add(new SubCategory
+        {
+            Name = newSubCategory.Name.Trim(),
+            GroupName = string.IsNullOrWhiteSpace(newSubCategory.GroupName) ? null : newSubCategory.GroupName.Trim(),
+            IsSampleData = false
+        });
+        await LogService.SaveCategoriesAsync(categories);
+        isAddSubCategoryOpen = false;
+    }
+
+    private void OpenAddLogEntry(SubCategory subCategory)
+    {
+        targetSubCategory = subCategory;
+        newLogEntry = new NewLogEntryInput();
+        isAddLogEntryOpen = true;
+    }
+
+    private void CloseAddLogEntry()
+    {
+        isAddLogEntryOpen = false;
+        targetSubCategory = null;
+    }
+
+    private async Task CreateLogEntry()
+    {
+        if (targetSubCategory is null)
+        {
+            return;
+        }
+
+        targetSubCategory.IsSampleData = false;
+        targetSubCategory.LogEntries.Add(new LogEntry
+        {
+            Date = newLogEntry.Date,
+            Title = newLogEntry.Title.Trim(),
+            Notes = newLogEntry.Notes.Trim(),
+            Cost = newLogEntry.Cost,
+            Mileage = newLogEntry.Mileage,
+            Brand = string.IsNullOrWhiteSpace(newLogEntry.Brand) ? null : newLogEntry.Brand.Trim(),
+            Model = string.IsNullOrWhiteSpace(newLogEntry.Model) ? null : newLogEntry.Model.Trim(),
+            Specifications = string.IsNullOrWhiteSpace(newLogEntry.Specifications) ? null : newLogEntry.Specifications.Trim(),
+            IsSampleData = false
+        });
+        await LogService.SaveCategoriesAsync(categories);
+        CloseAddLogEntry();
+    }
+
     private async Task ClearSampleData()
     {
-        categories.RemoveAll(category => category.IsSampleData);
-        await LogService.SaveCategoriesAsync(categories);
-        if (selectedCategory?.IsSampleData == true)
+        foreach (var category in categories)
         {
-            selectedCategory = categories.FirstOrDefault();
+            foreach (var subCategory in category.SubCategories)
+            {
+                subCategory.LogEntries.RemoveAll(entry => entry.IsSampleData == true);
+            }
+            category.SubCategories.RemoveAll(subCategory =>
+                subCategory.IsSampleData == true && subCategory.LogEntries.Count == 0);
+            if (category.IsSampleData && category.SubCategories.Any(subCategory => subCategory.IsSampleData != true))
+            {
+                category.IsSampleData = false;
+            }
+        }
+        categories.RemoveAll(category => category.IsSampleData && category.SubCategories.Count == 0);
+        await LogService.SaveCategoriesAsync(categories);
+        if (selectedCategory is not null && !categories.Contains(selectedCategory))
+        {
+            selectedCategory = null;
         }
     }
 
@@ -223,7 +508,18 @@
     {
         if (args.Key == "Escape")
         {
-            CloseAddCategory();
+            if (isAddLogEntryOpen)
+            {
+                CloseAddLogEntry();
+            }
+            else if (isAddSubCategoryOpen)
+            {
+                CloseAddSubCategory();
+            }
+            else
+            {
+                CloseAddCategory();
+            }
         }
     }
 
@@ -233,6 +529,47 @@
         [System.ComponentModel.DataAnnotations.StringLength(60, ErrorMessage = "Namnet får vara högst 60 tecken.")]
         public string Name { get; set; } = string.Empty;
 
+        public string Template { get; set; } = string.Empty;
+
+        public string SuggestedName { get; set; } = string.Empty;
+
         public string Icon { get; set; } = "box";
+    }
+
+    private sealed class NewSubCategoryInput
+    {
+        [System.ComponentModel.DataAnnotations.Required(ErrorMessage = "Skriv ett namn på underkategorin.")]
+        [System.ComponentModel.DataAnnotations.StringLength(60, ErrorMessage = "Namnet får vara högst 60 tecken.")]
+        public string Name { get; set; } = string.Empty;
+
+        [System.ComponentModel.DataAnnotations.StringLength(60, ErrorMessage = "Gruppen får vara högst 60 tecken.")]
+        public string GroupName { get; set; } = string.Empty;
+    }
+
+    private sealed class NewLogEntryInput
+    {
+        public DateOnly Date { get; set; } = DateOnly.FromDateTime(DateTime.Today);
+
+        [System.ComponentModel.DataAnnotations.Required(ErrorMessage = "Skriv vad som gjordes.")]
+        [System.ComponentModel.DataAnnotations.StringLength(100, ErrorMessage = "Händelsen får vara högst 100 tecken.")]
+        public string Title { get; set; } = string.Empty;
+
+        [System.ComponentModel.DataAnnotations.StringLength(2000, ErrorMessage = "Anteckningen får vara högst 2 000 tecken.")]
+        public string Notes { get; set; } = string.Empty;
+
+        [System.ComponentModel.DataAnnotations.StringLength(80, ErrorMessage = "Märket får vara högst 80 tecken.")]
+        public string Brand { get; set; } = string.Empty;
+
+        [System.ComponentModel.DataAnnotations.StringLength(80, ErrorMessage = "Modellen får vara högst 80 tecken.")]
+        public string Model { get; set; } = string.Empty;
+
+        [System.ComponentModel.DataAnnotations.StringLength(300, ErrorMessage = "Specifikationerna får vara högst 300 tecken.")]
+        public string Specifications { get; set; } = string.Empty;
+
+        [System.ComponentModel.DataAnnotations.Range(0, 100000000, ErrorMessage = "Ange en giltig kostnad.")]
+        public decimal? Cost { get; set; }
+
+        [System.ComponentModel.DataAnnotations.Range(0, 10000000, ErrorMessage = "Ange ett giltigt mätarvärde.")]
+        public int? Mileage { get; set; }
     }
 }
