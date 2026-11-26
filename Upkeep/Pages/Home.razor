@@ -1,5 +1,6 @@
 @page "/"
 @using System.Globalization
+@using System.Text.Json
 @inject ILogService LogService
 @inject IJSRuntime JS
 
@@ -32,11 +33,20 @@
         <section class="category-section" aria-labelledby="category-heading">
             <div class="section-heading">
                 <h2 id="category-heading">Kategorier</h2>
-                @if (HasSampleData)
-                {
-                    <button class="text-button" type="button" @onclick="ClearSampleData">Rensa exempeldata</button>
-                }
+                <div class="backup-actions">
+                    <button class="text-button" type="button" @onclick="ExportBackup">Exportera backup</button>
+                    <InputFile id="backup-file" OnChange="ImportBackup" accept=".json,application/json" />
+                    <label class="text-button import-backup-button" for="backup-file">Återställ backup</label>
+                    @if (HasSampleData)
+                    {
+                        <button class="text-button" type="button" @onclick="ClearSampleData">Rensa exempeldata</button>
+                    }
+                </div>
             </div>
+            @if (!string.IsNullOrEmpty(backupMessage))
+            {
+                <p class="backup-message @(backupError ? "is-error" : "")" role="status">@backupMessage</p>
+            }
 
             @if (isLoading)
             {
@@ -111,6 +121,12 @@
                                                 : $"{subCategory.LogEntries.Count} {(subCategory.LogEntries.Count == 1 ? "händelse" : "händelser")}")</p>
                                         </div>
                                         <button class="text-button add-log-button" type="button" @onclick="() => OpenAddLogEntry(subCategory)">Ny händelse</button>
+                                        <button class="text-button row-action" type="button" aria-label="Redigera underkategori @subCategory.Name" @onclick="() => OpenEditSubCategory(subCategory)">
+                                            <i data-lucide="pencil" aria-hidden="true"></i>
+                                        </button>
+                                        <button class="text-button row-action delete-action" type="button" aria-label="Ta bort underkategori @subCategory.Name" @onclick="() => DeleteSubCategory(subCategory)">
+                                            <i data-lucide="trash-2" aria-hidden="true"></i>
+                                        </button>
                                     </div>
                                     @if (subCategory.LogEntries.Count > 0)
                                     {
@@ -131,6 +147,14 @@
                                                         {
                                                             <p class="log-entry-meta">@details</p>
                                                         }
+                                                    </div>
+                                                    <div class="log-entry-actions">
+                                                        <button class="text-button row-action" type="button" aria-label="Redigera händelse @entry.Title" @onclick="() => OpenEditLogEntry(subCategory, entry)">
+                                                            <i data-lucide="pencil" aria-hidden="true"></i>
+                                                        </button>
+                                                        <button class="text-button row-action delete-action" type="button" aria-label="Ta bort händelse @entry.Title" @onclick="() => DeleteLogEntry(subCategory, entry)">
+                                                            <i data-lucide="trash-2" aria-hidden="true"></i>
+                                                        </button>
                                                     </div>
                                                 </article>
                                             }
@@ -192,12 +216,12 @@
     <div class="modal-backdrop" @onclick="CloseAddSubCategory" @onkeydown="HandleModalKeyDown">
         <section class="category-modal" role="dialog" aria-modal="true" aria-labelledby="subcategory-modal-heading" @onclick:stopPropagation="true">
             <div class="modal-heading">
-                <h2 id="subcategory-modal-heading">Ny underkategori</h2>
+                <h2 id="subcategory-modal-heading">@(editingSubCategory is null ? "Ny underkategori" : "Redigera underkategori")</h2>
                 <button class="icon-button" type="button" aria-label="Stäng" @onclick="CloseAddSubCategory">
                     <i data-lucide="x"></i>
                 </button>
             </div>
-            <EditForm Model="newSubCategory" OnValidSubmit="CreateSubCategory">
+            <EditForm Model="newSubCategory" OnValidSubmit="SaveSubCategory">
                 <DataAnnotationsValidator />
                 <label for="subcategory-group">Grupp (valfritt)</label>
                 <InputText id="subcategory-group" @bind-Value="newSubCategory.GroupName" placeholder="Till exempel Ytskikt" maxlength="60" />
@@ -208,7 +232,7 @@
 
                 <div class="modal-actions">
                     <button class="secondary-button" type="button" @onclick="CloseAddSubCategory">Avbryt</button>
-                    <button class="primary-button" type="submit">Spara</button>
+                    <button class="primary-button" type="submit">@(editingSubCategory is null ? "Spara" : "Spara ändringar")</button>
                 </div>
             </EditForm>
         </section>
@@ -220,7 +244,7 @@
     <div class="modal-backdrop" @onclick="CloseAddLogEntry" @onkeydown="HandleModalKeyDown">
         <section class="category-modal" role="dialog" aria-modal="true" aria-labelledby="log-modal-heading" @onclick:stopPropagation="true">
             <div class="modal-heading">
-                <h2 id="log-modal-heading">Ny händelse · @targetSubCategory.Name</h2>
+                <h2 id="log-modal-heading">@(editingLogEntry is null ? "Ny händelse" : "Redigera händelse") · @targetSubCategory.Name</h2>
                 <button class="icon-button" type="button" aria-label="Stäng" @onclick="CloseAddLogEntry">
                     <i data-lucide="x"></i>
                 </button>
@@ -259,7 +283,7 @@
 
                 <div class="modal-actions">
                     <button class="secondary-button" type="button" @onclick="CloseAddLogEntry">Avbryt</button>
-                    <button class="primary-button" type="submit">Spara händelse</button>
+                    <button class="primary-button" type="submit">@(editingLogEntry is null ? "Spara händelse" : "Spara ändringar")</button>
                 </div>
             </EditForm>
         </section>
@@ -269,12 +293,22 @@
 @code {
     private const string ThemeStorageKey = "upkeep-theme";
     private static readonly CultureInfo SwedishCulture = CultureInfo.GetCultureInfo("sv-SE");
+    private static readonly JsonSerializerOptions BackupJsonOptions = new(JsonSerializerDefaults.Web)
+    {
+        WriteIndented = true
+    };
+    private const long MaxBackupSize = 5 * 1024 * 1024;
+    private static readonly HashSet<string> SupportedIcons = ["car-front", "house", "bike", "trees", "box"];
     private List<Category> categories = [];
     private Category? selectedCategory;
     private NewCategoryInput newCategory = new();
     private NewSubCategoryInput newSubCategory = new();
     private NewLogEntryInput newLogEntry = new();
     private SubCategory? targetSubCategory;
+    private SubCategory? editingSubCategory;
+    private LogEntry? editingLogEntry;
+    private string? backupMessage;
+    private bool backupError;
     private bool isLoading = true;
     private bool isDarkMode;
     private bool isAddCategoryOpen;
@@ -428,33 +462,74 @@
 
     private void OpenAddSubCategory()
     {
+        editingSubCategory = null;
         newSubCategory = new NewSubCategoryInput();
         isAddSubCategoryOpen = true;
     }
 
     private void CloseAddSubCategory() => isAddSubCategoryOpen = false;
 
-    private async Task CreateSubCategory()
+    private void OpenEditSubCategory(SubCategory subCategory)
+    {
+        editingSubCategory = subCategory;
+        newSubCategory = new NewSubCategoryInput
+        {
+            Name = subCategory.Name,
+            GroupName = subCategory.GroupName ?? string.Empty
+        };
+        isAddSubCategoryOpen = true;
+    }
+
+    private async Task SaveSubCategory()
     {
         if (selectedCategory is null)
         {
             return;
         }
 
-        selectedCategory.SubCategories.Add(new SubCategory
+        if (editingSubCategory is null)
         {
-            Name = newSubCategory.Name.Trim(),
-            GroupName = string.IsNullOrWhiteSpace(newSubCategory.GroupName) ? null : newSubCategory.GroupName.Trim(),
-            IsSampleData = false
-        });
+            selectedCategory.SubCategories.Add(new SubCategory
+            {
+                Name = newSubCategory.Name.Trim(),
+                GroupName = string.IsNullOrWhiteSpace(newSubCategory.GroupName) ? null : newSubCategory.GroupName.Trim(),
+                IsSampleData = false
+            });
+        }
+        else
+        {
+            editingSubCategory.Name = newSubCategory.Name.Trim();
+            editingSubCategory.GroupName = string.IsNullOrWhiteSpace(newSubCategory.GroupName) ? null : newSubCategory.GroupName.Trim();
+            editingSubCategory.IsSampleData = false;
+        }
+
         await LogService.SaveCategoriesAsync(categories);
-        isAddSubCategoryOpen = false;
+        CloseAddSubCategory();
     }
 
     private void OpenAddLogEntry(SubCategory subCategory)
     {
         targetSubCategory = subCategory;
+        editingLogEntry = null;
         newLogEntry = new NewLogEntryInput();
+        isAddLogEntryOpen = true;
+    }
+
+    private void OpenEditLogEntry(SubCategory subCategory, LogEntry entry)
+    {
+        targetSubCategory = subCategory;
+        editingLogEntry = entry;
+        newLogEntry = new NewLogEntryInput
+        {
+            Date = entry.Date,
+            Title = entry.Title,
+            Notes = entry.Notes,
+            Brand = entry.Brand ?? string.Empty,
+            Model = entry.Model ?? string.Empty,
+            Specifications = entry.Specifications ?? string.Empty,
+            Cost = entry.Cost,
+            Mileage = entry.Mileage
+        };
         isAddLogEntryOpen = true;
     }
 
@@ -462,6 +537,7 @@
     {
         isAddLogEntryOpen = false;
         targetSubCategory = null;
+        editingLogEntry = null;
     }
 
     private async Task CreateLogEntry()
@@ -471,21 +547,195 @@
             return;
         }
 
-        targetSubCategory.IsSampleData = false;
-        targetSubCategory.LogEntries.Add(new LogEntry
+        if (editingLogEntry is null)
         {
-            Date = newLogEntry.Date,
-            Title = newLogEntry.Title.Trim(),
-            Notes = newLogEntry.Notes.Trim(),
-            Cost = newLogEntry.Cost,
-            Mileage = newLogEntry.Mileage,
-            Brand = string.IsNullOrWhiteSpace(newLogEntry.Brand) ? null : newLogEntry.Brand.Trim(),
-            Model = string.IsNullOrWhiteSpace(newLogEntry.Model) ? null : newLogEntry.Model.Trim(),
-            Specifications = string.IsNullOrWhiteSpace(newLogEntry.Specifications) ? null : newLogEntry.Specifications.Trim(),
-            IsSampleData = false
-        });
+            targetSubCategory.IsSampleData = false;
+            editingLogEntry = new LogEntry();
+            targetSubCategory.LogEntries.Add(editingLogEntry);
+        }
+
+        editingLogEntry.Date = newLogEntry.Date;
+        editingLogEntry.Title = newLogEntry.Title.Trim();
+        editingLogEntry.Notes = newLogEntry.Notes.Trim();
+        editingLogEntry.Cost = newLogEntry.Cost;
+        editingLogEntry.Mileage = newLogEntry.Mileage;
+        editingLogEntry.Brand = string.IsNullOrWhiteSpace(newLogEntry.Brand) ? null : newLogEntry.Brand.Trim();
+        editingLogEntry.Model = string.IsNullOrWhiteSpace(newLogEntry.Model) ? null : newLogEntry.Model.Trim();
+        editingLogEntry.Specifications = string.IsNullOrWhiteSpace(newLogEntry.Specifications) ? null : newLogEntry.Specifications.Trim();
+        editingLogEntry.IsSampleData = false;
         await LogService.SaveCategoriesAsync(categories);
         CloseAddLogEntry();
+    }
+
+    private async Task DeleteLogEntry(SubCategory subCategory, LogEntry entry)
+    {
+        var confirmed = await JS.InvokeAsync<bool>("confirm", $"Ta bort händelsen ”{entry.Title}”?");
+        if (!confirmed)
+        {
+            return;
+        }
+
+        subCategory.LogEntries.Remove(entry);
+        await LogService.SaveCategoriesAsync(categories);
+    }
+
+    private async Task DeleteSubCategory(SubCategory subCategory)
+    {
+        var category = selectedCategory;
+        if (category is null)
+        {
+            return;
+        }
+
+        var confirmed = await JS.InvokeAsync<bool>("confirm",
+            $"Ta bort underkategorin ”{subCategory.Name}” och dess {subCategory.LogEntries.Count} händelser?");
+        if (!confirmed)
+        {
+            return;
+        }
+
+        category.SubCategories.Remove(subCategory);
+        ClearSampleCategoryMarkerIfNeeded(category);
+        await LogService.SaveCategoriesAsync(categories);
+    }
+
+    private static void ClearSampleCategoryMarkerIfNeeded(Category category)
+    {
+        if (category.IsSampleData &&
+            !category.SubCategories.Any(subCategory =>
+                subCategory.IsSampleData == true ||
+                subCategory.LogEntries.Any(entry => entry.IsSampleData == true)))
+        {
+            category.IsSampleData = false;
+        }
+    }
+
+    private async Task ExportBackup()
+    {
+        SetBackupMessage(null);
+        try
+        {
+            var backup = new LogBackup { Categories = categories };
+            var json = JsonSerializer.Serialize(backup, BackupJsonOptions);
+            var filename = $"upkeep-backup-{DateTime.Now:yyyy-MM-dd}.json";
+            await JS.InvokeVoidAsync("upkeep.downloadFile", filename, json);
+            SetBackupMessage("Säkerhetskopian laddades ner.");
+        }
+        catch (JSException)
+        {
+            SetBackupMessage("Kunde inte skapa säkerhetskopian. Försök igen.", true);
+        }
+    }
+
+    private async Task ImportBackup(InputFileChangeEventArgs args)
+    {
+        SetBackupMessage(null);
+        try
+        {
+            var file = args.File;
+            await using var stream = file.OpenReadStream(MaxBackupSize);
+            var backup = await JsonSerializer.DeserializeAsync<LogBackup>(stream, BackupJsonOptions);
+            ValidateBackup(backup);
+
+            var confirmed = await JS.InvokeAsync<bool>(
+                "confirm",
+                "Återställa säkerhetskopian? Nuvarande kategorier och händelser ersätts helt.");
+            if (!confirmed)
+            {
+                SetBackupMessage("Återställningen avbröts.");
+                return;
+            }
+
+            await LogService.SaveCategoriesAsync(backup!.Categories);
+            categories = backup.Categories;
+            selectedCategory = null;
+            SetBackupMessage("Säkerhetskopian återställdes.");
+        }
+        catch (JsonException)
+        {
+            SetBackupMessage("Filen är inte en giltig Upkeep-säkerhetskopia.", true);
+        }
+        catch (InvalidDataException exception)
+        {
+            SetBackupMessage(exception.Message, true);
+        }
+        catch (IOException)
+        {
+            SetBackupMessage("Filen är för stor eller kunde inte läsas. Maxstorlek är 5 MB.", true);
+        }
+        catch (JSException)
+        {
+            SetBackupMessage("Kunde inte bekräfta eller spara säkerhetskopian.", true);
+        }
+        finally
+        {
+            await JS.InvokeVoidAsync("upkeep.clearFileInput", "backup-file");
+        }
+    }
+
+    private static void ValidateBackup(LogBackup? backup)
+    {
+        if (backup is null || backup.FormatVersion != 1)
+        {
+            throw new InvalidDataException("Säkerhetskopian har ett format som inte stöds.");
+        }
+        if (backup.Categories is null || backup.Categories.Count > 200)
+        {
+            throw new InvalidDataException("Säkerhetskopian innehåller för många kategorier eller saknar kategorier.");
+        }
+
+        var subCategoryCount = 0;
+        var logEntryCount = 0;
+        foreach (var category in backup.Categories)
+        {
+            if (category is null || string.IsNullOrWhiteSpace(category.Name) || category.Name.Length > 60)
+            {
+                throw new InvalidDataException("En kategori i säkerhetskopian saknar ett giltigt namn.");
+            }
+            if (!SupportedIcons.Contains(category.Icon))
+            {
+                throw new InvalidDataException($"Kategorin ”{category.Name}” har en ikon som inte stöds.");
+            }
+            if (category.SubCategories is null)
+            {
+                throw new InvalidDataException($"Kategorin ”{category.Name}” saknar underkategorier.");
+            }
+
+            subCategoryCount += category.SubCategories.Count;
+            foreach (var subCategory in category.SubCategories)
+            {
+                if (subCategory is null || string.IsNullOrWhiteSpace(subCategory.Name) || subCategory.Name.Length > 60)
+                {
+                    throw new InvalidDataException($"En underkategori i ”{category.Name}” saknar ett giltigt namn.");
+                }
+                if (subCategory.GroupName?.Length > 60 || subCategory.LogEntries is null)
+                {
+                    throw new InvalidDataException($"Underkategorin ”{subCategory.Name}” innehåller ogiltiga uppgifter.");
+                }
+
+                logEntryCount += subCategory.LogEntries.Count;
+                foreach (var entry in subCategory.LogEntries)
+                {
+                    if (entry is null || string.IsNullOrWhiteSpace(entry.Title) || entry.Title.Length > 100 ||
+                        entry.Notes?.Length > 2000 || entry.Brand?.Length > 80 || entry.Model?.Length > 80 ||
+                        entry.Specifications?.Length > 300 || entry.Cost < 0 || entry.Mileage < 0)
+                    {
+                        throw new InvalidDataException($"En händelse i ”{subCategory.Name}” innehåller ogiltiga uppgifter.");
+                    }
+                }
+            }
+        }
+
+        if (subCategoryCount > 2000 || logEntryCount > 20000)
+        {
+            throw new InvalidDataException("Säkerhetskopian innehåller för många underkategorier eller händelser.");
+        }
+    }
+
+    private void SetBackupMessage(string? message, bool isError = false)
+    {
+        backupMessage = message;
+        backupError = isError;
     }
 
     private async Task ClearSampleData()
@@ -495,6 +745,10 @@
             foreach (var subCategory in category.SubCategories)
             {
                 subCategory.LogEntries.RemoveAll(entry => entry.IsSampleData == true);
+                if (subCategory.IsSampleData == true && subCategory.LogEntries.Count > 0)
+                {
+                    subCategory.IsSampleData = false;
+                }
             }
             category.SubCategories.RemoveAll(subCategory =>
                 subCategory.IsSampleData == true && subCategory.LogEntries.Count == 0);

@@ -13,7 +13,7 @@ Upkeep/
   wwwroot/      App shell, theme styles, icons, and PWA assets
 ```
 
-The dashboard seeds Swedish car and home examples on first launch. Category templates create common subcategories (such as oil changes, service, and grouped home surfaces), and each subcategory can store dated maintenance events. Data is stored in browser local storage; **Rensa exempeldata** removes sample records without deleting custom entries.
+The dashboard seeds Swedish car and home examples on first launch. Category templates create common subcategories (such as oil changes, service, and grouped home surfaces), and each subcategory can store dated maintenance events. Events and subcategories can be edited or deleted. Data is stored in browser local storage; use **Exportera backup** to download a JSON copy and **Återställ backup** to validate and restore one. Restoring replaces the current data after confirmation.
 
 Run locally with `dotnet run --project Upkeep/Upkeep.csproj`.
 
